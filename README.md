@@ -88,38 +88,79 @@ You can add more tests in `tests/test_recommender.py`.
 
 ---
 
-## Experiments You Tried
+## Evaluation & Stress Testing
 
-### Test Scenario 1: Default User (pop/happy at 0.8 energy)
+### Test Case 1: High-Energy Pop Lover
+`{"genre": "pop", "mood": "happy", "energy": 0.8}`
 
-Input: `{"genre": "pop", "mood": "happy", "energy": 0.8}`
+✅ **Result:** Works perfectly. Top recommendation is "Sunrise City" (pop, happy, 0.82 energy) with score 6.46. System correctly weights genre + mood + energy proximity.
 
-**Top 5 Results:**
-1. Sunrise City (pop, happy, 0.82 energy) - Score: 6.46
-   - Reason: genre matches; mood matches; energy is close to preference
-2. City Sunrise (pop, nostalgic, 0.70 energy) - Score: 4.80
-   - Reason: genre matches; energy is close to preference
-3. Gym Hero (pop, intense, 0.93 energy) - Score: 4.74
-   - Reason: genre matches; energy is close to preference
-4. Rooftop Lights (indie pop, happy, 0.76 energy) - Score: 3.42
-   - Reason: mood matches; energy is close to preference
-5. Neon Pulse (electronic, upbeat, 0.85 energy) - Score: 1.90
-   - Reason: energy is close to preference
+### Test Case 2: Chill Lofi Focus Music
+`{"genre": "lofi", "mood": "chill", "energy": 0.4, "likes_acoustic": true}`
 
-**Observation:** The system correctly prioritizes "Sunrise City" (perfect genre + mood + energy match). It also surfaces pure genre matches even when the mood differs, which makes sense for the pop/happy user.
+✅ **Result:** Excellent. Top two "Midnight Coding" (6.96) and "Library Rain" (6.90) are both lofi, chill, low-energy, and acoustic. Recommender found genre + mood + energy + acoustic alignment.
 
-### Test Scenario 2: Expected Behavior
+### Test Case 3: Deep Intense Rock
+`{"genre": "rock", "mood": "intense", "energy": 0.9}`
 
-- Genre matches consistently appear in the top rankings
-- Mood match + energy proximity can lift songs above pure genre matches
-- Energy distance is calculated as a continuous value, rewarding close matches
-- Users get text explanations for why each song was recommended
+✅ **Result:** Returns "Storm Runner" (rock, intense, 0.91 energy) as #1 with score 6.48. Perfect match.
 
-### Key Insights
+### Test Case 4: Peaceful Acoustic Folk
+`{"genre": "folk", "mood": "peaceful", "energy": 0.3, "likes_acoustic": true}`
 
-- The system successfully differentiates between genre and mood signals
-- Energy distance calculations provide nuance—not all 0.9-energy songs score equally high
-- All tests pass (2/2), confirming that the recommendation and explanation functions work as designed
+✅ **Result:** "Forest Hymn" (folk, peaceful, 0.45 energy, acoustic) scores 6.70. System works well for consistent, low-energy preferences.
+
+### Test Case 5: Upbeat Electronic Dance
+`{"genre": "electronic", "mood": "upbeat", "energy": 0.85}`
+
+✅ **Result:** "Neon Pulse" (electronic, upbeat, 0.85 energy) scores 6.50. Perfect match.
+
+### Test Case 6: Conflicting Preferences (Edge Case)
+`{"genre": "pop", "mood": "happy", "energy": 0.2, "likes_acoustic": true}`
+
+❌ **FAILURE CASE:** User wants happy pop music BUT at low energy (0.2). Recommender returns:
+1. **Sunrise City** (pop, happy, **0.82 energy**) - Score: 5.26  ← High energy!
+2. City Sunrise (pop, nostalgic, 0.70 energy) - Score: 4.00
+3. Gym Hero (pop, intense, **0.93 energy**) - Score: 3.54  ← Very high energy!
+
+**Why this fails:** Genre match (+3.0) outweighs energy mismatch. "Sunrise City" gets 3.0 for genre + 1.5 for mood + 0.76 for poor energy = 5.26. A low-energy non-pop alternative (e.g., "Spacewalk Thoughts" at 0.28 energy) only scores 2.34 despite matching energy + acoustic preferences. **Conclusion: Genre weight is 3× more important than energy, making conflicting preferences unrecoverable.**
+
+### Weight Sensitivity Experiment
+
+Tested if reducing genre weight (3.0 → 2.0) and increasing energy weight (2.0 → 3.0) could fix conflicting preferences:
+
+| Metric | Original | Experimental | Change |
+|---|---|---|---|
+| Genre weight | 3.0 | 2.0 | -33% |
+| Energy weight (max) | 2.0 | 3.0 | +50% |
+| Top song for low-energy user | Sunrise City (5.26) | Sunrise City (4.64) | Still genre-first |
+| #3 song | Gym Hero (3.54) | Spacewalk Thoughts (3.26) | Energy ranked higher |
+
+**Finding:** Even with increased energy weight, genre still dominates the top recommendations. The architecture (simple weighted sum) cannot handle truly conflicting preferences. A user wanting "happy but chill" would need a multiplicative or conditional model to balance competing signals.
+
+### Key Insights Across All Cases
+
+1. **Genre is the dominant signal.** 5/6 profiles with clear genre preferences received genre-matched recommendations as #1. No weight adjustment changed this.
+
+2. **Conflicting preferences break the model.** The simple weighted sum cannot satisfy competing signals (e.g., "happy but low energy"). Real systems use ensemble methods or conditional logic to handle this.
+
+3. **Energy distance works well for aligned preferences.** Users targeting low energy (0.3–0.4) correctly receive songs in the 0.28–0.45 range, providing nuance and variety.
+
+4. **Explanations build trust.** By providing text reasons, users understand exactly why they got a recommendation and can spot errors.
+
+5. **Mood matters, but is underweighted.** Mood (1.5 points) is 2× weaker than genre (3.0 points). For some music fans, mood might be MORE important than strict genre matching.
+
+---
+
+## 📋 Evaluation Checkpoint
+
+✅ **Completed:**
+- 6 user profiles tested (5 aligned cases pass; 1 edge case reveals critical limitation)
+- Weight sensitivity experiment confirms architectural constraint
+- Bias and limitation analysis documented in model_card.md
+- All unit tests passing (2/2)
+
+✅ **Key Finding:** The system works well when user preferences align but reveals the limitation of simple weighted-sum models when handling conflicting signals. This explains why real streaming services use hybrid and ensemble approaches.
 
 ---
 
@@ -132,10 +173,11 @@ All core components are implemented and tested:
 - ✅ Scoring logic: `score_song_for_user()` returns both numeric score and text explanation
 - ✅ Recommender: Both OOP (`Recommender.recommend()`) and functional (`recommend_songs()`) implementations
 - ✅ Tests: 2/2 passing (songs sorted by score, explanations non-empty)
-- ✅ CLI: `python -m src.main` outputs recommendations with scores and reasons
-- ✅ Dataset: 18 songs with diverse genres and moods (pop, rock, metal, latin, folk, electronic, reggae, classical, hip hop, jazz, ambient, lofi, indie pop, synthwave)
+- ✅ CLI: `python -m src.main` outputs comprehensive recommendations with scores and reasons
+- ✅ Dataset: 18 songs with diverse genres and moods across 14 genres
+- ✅ Evaluation: 6 test profiles with detailed findings documented in README and model_card.md
 
-The recommender is ready for evaluation and experimentation.
+The recommender successfully demonstrates content-based filtering and reveals key architectural limitations of simple approaches.
 
 ---
 
